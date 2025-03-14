@@ -1,0 +1,241 @@
+<!DOCTYPE html>
+<html lang="de">
+<head>
+  <meta charset="UTF-8">
+  <title>Kollidierende Blöcke – Pi-Experiment Simulation</title>
+  <style>
+    body {
+      font-family: Arial, sans-serif;
+      background: #f5f5f5;
+      text-align: center;
+      margin: 0;
+      padding: 20px;
+    }
+    h1 {
+      margin-bottom: 10px;
+    }
+    #simulationCanvas {
+      background: #fff;
+      border: 2px solid #ccc;
+      display: block;
+      margin: 20px auto;
+    }
+    #controls {
+      margin-top: 10px;
+    }
+    #controls input, #controls button {
+      font-size: 16px;
+      padding: 5px 10px;
+      margin: 5px;
+    }
+    #controls label {
+      font-weight: bold;
+    }
+  </style>
+</head>
+<body>
+  <h1>Kollidierende Blöcke – Pi-Experiment Simulation</h1>
+  <canvas id="simulationCanvas" width="800" height="300"></canvas>
+  <div id="controls">
+    <button id="startButton">Start</button>
+    <button id="simulateButton">Simulieren</button>
+    <label for="massInput">Masse des großen Blocks (kg):</label>
+    <input type="number" id="massInput" value="100" step="1" min="1">
+    <span>Anzahl Kollisionen: <span id="collisionCount">0</span></span>
+  </div>
+
+  <script>
+    const canvas = document.getElementById("simulationCanvas");
+    const ctx = canvas.getContext("2d");
+
+    // Basisgröße des kleinen Blocks (1 kg)
+    const baseSize = 20;       // 20px Seitenlänge für 1 kg
+    const massSmall = 1;       // Kleiner Block ist immer 1 kg
+    const sizeSmall = baseSize; // Feste Größe für 1 kg
+
+    // Variablen für den großen Block (Masse, Größe)
+    let massBig = 100;  
+    let sizeBig;  // wird berechnet: baseSize * 2^(log10(massBig)/2)
+
+	let time = 0;
+
+    // Positions- und Geschwindigkeitsvariablen (nur x-Richtung)
+    let posSmall, posBig;
+    let vSmall, vBig;
+
+    // Physikalische und Simulationsparameter
+    const wallX = 0;           // Wand links bei x = 0
+    const dt = 0.001;          // Zeitschritt (in "Sekunden")
+    const stepsPerFrame = 100; // Anzahl Updates pro Animationsschritt
+    const speedFactor = 5;     // Umrechnungsfaktor in Pixel (Animation verlangsamt)
+
+    let collisionCount = 0;    // Zähler der Kollisionen
+    let running = false;       // Status der Animation
+    let animationFrameId;      // ID für requestAnimationFrame
+
+    // Position der Fahrbahn (wird als Linie gezeichnet)
+    const groundY = canvas.height - 10;
+
+    // Berechnet den Skalierungsfaktor für den großen Block
+    function getScaleFactor(mass) {
+      // Beispielsweise: 100 kg -> 2, 10000 kg -> 4, etc.
+      return Math.pow(2, (Math.log10(mass) / 2));
+    }
+
+    // Zeichnet die Szene: Wand, Fahrbahn, beide Blöcke und Massenbeschriftungen
+    function draw() {
+      ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+      // Wand zeichnen
+      ctx.fillStyle = "#444";
+      ctx.fillRect(wallX, 0, 5, canvas.height);
+
+      // Fahrbahn als horizontale Linie
+      ctx.strokeStyle = "#888";
+      ctx.lineWidth = 2;
+      ctx.beginPath();
+      ctx.moveTo(0, groundY);
+      ctx.lineTo(canvas.width, groundY);
+      ctx.stroke();
+
+      // Kleiner Block (1 kg)
+      const ySmall = groundY - sizeSmall;
+      ctx.fillStyle = "#3498db";
+      ctx.fillRect(posSmall, ySmall, sizeSmall, sizeSmall);
+      ctx.fillStyle = "#000";
+      ctx.font = "14px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("1 kg", posSmall + sizeSmall / 2, ySmall - 5);
+
+      // Großer Block
+      const yBig = groundY - sizeBig;
+      ctx.fillStyle = "#e74c3c";
+      ctx.fillRect(posBig, yBig, sizeBig, sizeBig);
+      ctx.fillStyle = "#000";
+      ctx.font = "14px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText(massBig + " kg", posBig + sizeBig / 2, yBig - 5);
+
+	  ctx.font = "14px Arial";
+      ctx.textAlign = "center";
+      ctx.fillText("Time: "+ Math.round(time * 100) / 100, canvas.width/2 - 50, 15);
+
+      // Aktualisiere den angezeigten Kollisionszähler im DOM
+      document.getElementById("collisionCount").textContent = collisionCount;
+    }
+
+    // Setzt den Ausgangszustand der Simulation zurück
+    function resetSimulation() {
+      // Lese die Masse des großen Blocks und berechne die Größe
+      massBig = parseFloat(document.getElementById("massInput").value);
+      sizeBig = baseSize * getScaleFactor(massBig);
+
+      collisionCount = 0;
+
+      // Anfangspositionen:
+      // Kleiner Block nahe der Wand (z. B. 100px)
+      posSmall = 100;
+      // Großer Block rechts vom kleinen Block (Abstand 50px)
+      posBig = posSmall + sizeSmall + 50;
+
+      // Anfangsgeschwindigkeiten:
+      vSmall = 0;   // Kleiner Block ruht
+      vBig = -2;    // Großer Block fährt nach links
+
+      // Stoppe eventuell laufende Animationen
+      running = false;
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+	  time = 0;
+      draw();
+    }
+
+    // Animierte Simulation (mit Wartezeiten)
+    function animate() {
+      for (let i = 0; i < stepsPerFrame; i++) {
+        posBig += vBig * dt * speedFactor;
+        posSmall += vSmall * dt * speedFactor;
+
+        // Kollision: Kleiner Block trifft die Wand
+        if (posSmall <= wallX) {
+          posSmall = wallX;
+          vSmall = -vSmall;
+          collisionCount++;
+        }
+
+        // Kollision: Großer Block trifft den kleinen Block
+        if (posBig <= posSmall + sizeSmall) {
+          posBig = posSmall + sizeSmall; // Überlappung verhindern
+          let newVBig = ((massBig - massSmall) * vBig + 2 * massSmall * vSmall) / (massBig + massSmall);
+          let newVSmall = ((massSmall - massBig) * vSmall + 2 * massBig * vBig) / (massBig + massSmall);
+          vBig = newVBig;
+          vSmall = newVSmall;
+          collisionCount++;
+        }
+      }
+	  time += dt * 10;
+      draw();
+
+      // Abbruchbedingung: Beide Blöcke fahren nach rechts und der kleine Block ist langsamer
+      if (vBig > 0 && vSmall >= 0 && vSmall < vBig) {
+        running = false;
+      }
+      if (running) {
+        animationFrameId = requestAnimationFrame(animate);
+      }
+    }
+
+    // Schnellsimulation: Führt die Updates in einem synchronen Loop aus, bis die Abbruchbedingung erreicht ist
+    function simulateFull() {
+      // Falls eine Animation läuft, stoppen
+      running = false;
+      if (animationFrameId) {
+        cancelAnimationFrame(animationFrameId);
+      }
+      // Schnelle Simulation
+      running = true;
+      while (running) {
+        for (let i = 0; i < stepsPerFrame; i++) {
+          posBig += vBig * dt * speedFactor;
+          posSmall += vSmall * dt * speedFactor;
+
+          if (posSmall <= wallX) {
+            posSmall = wallX;
+            vSmall = -vSmall;
+            collisionCount++;
+          }
+          if (posBig <= posSmall + sizeSmall) {
+            posBig = posSmall + sizeSmall;
+            let newVBig = ((massBig - massSmall) * vBig + 2 * massSmall * vSmall) / (massBig + massSmall);
+            let newVSmall = ((massSmall - massBig) * vSmall + 2 * massBig * vBig) / (massBig + massSmall);
+            vBig = newVBig;
+            vSmall = newVSmall;
+            collisionCount++;
+          }
+        }
+        if (vBig > 0 && vSmall >= 0 && vSmall < vBig) {
+          running = false;
+        }
+		time += dt * 10;
+      }
+      draw();
+    }
+
+    // Event-Listener für die Buttons:
+    // Bei Klick wird zuerst zurückgesetzt, dann entweder animiert oder sofort simuliert.
+    document.getElementById("startButton").addEventListener("click", () => {
+      resetSimulation();
+      running = true;
+      animate();
+    });
+    document.getElementById("simulateButton").addEventListener("click", () => {
+      resetSimulation();
+      simulateFull();
+    });
+
+    // Zeichne den Ausgangszustand beim Laden der Seite
+    resetSimulation();
+  </script>
+</body>
+</html>
